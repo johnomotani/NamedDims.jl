@@ -73,10 +73,35 @@ function Base.copyto!(dest::AbstractArray, bc::Broadcasted{NamedDimsStyle{S}}) w
 end
 
 broadcasted_names(bc::Broadcasted) = broadcasted_names(bc.args...)
-function broadcasted_names(a, bs...)
-    a_name = broadcasted_names(a)
-    b_name = broadcasted_names(bs...)
-    return unify_names_longest(a_name, b_name)
+const unroll_size = 2
+# Create wrapper that handles calls with more arguments than unroll_size
+let argnames = Tuple(Symbol("a$i") for i ∈ 1:unroll_size)
+    eval(quote
+         function broadcasted_names($(argnames...), bs...)
+             a_name = broadcasted_names($(argnames...))
+             b_name = broadcasted_names(bs...)
+             return unify_names_longest(a_name, b_name)
+         end
+    end)
+end
+# Create unrolled functions that call broadcasted_names on each argument for numbers of
+# arguments up to unroll_size
+for n ∈ 2:unroll_size
+    argnames = Tuple(Symbol("a$(i)") for i ∈ 1:n)
+    names = Tuple(Symbol("a$(i)_name") for i ∈ 1:n)
+    func_body = :()
+    for (argname, name) ∈ zip(argnames, names)
+        func_body = quote
+            $func_body
+            $name = broadcasted_names($argname)
+        end
+    end
+    eval(quote
+        function broadcasted_names($(argnames...))
+            $func_body
+            return unify_names_longest($(names...))
+        end
+    end)
 end
 broadcasted_names(a::AbstractArray) = dimnames(a)
 broadcasted_names(a) = tuple()
